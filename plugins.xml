@@ -1,0 +1,5 @@
+<library path="follow_path_plugins">
+  <class type="follow_path_plugins::FollowPathTraj" base_class_type="follow_path_base::FollowPathBase">
+    <description>Follow Path done with speed commands.</description>
+  </class>
+</library>
