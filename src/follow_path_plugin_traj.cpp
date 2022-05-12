@@ -1,29 +1,53 @@
 #include "follow_path_base.hpp"
-#include "as2_msgs/msg/trajectory_waypoints.hpp"
+#include "as2_msgs/msg/pose_stamped_with_id.hpp"
+#include "as2_msgs/srv/send_trajectory_waypoints.hpp"
+#include "as2_msgs/srv/set_speed.hpp"
+#include "as2_core/names/services.hpp"
+
+#include "as2_core/synchronous_service_client.hpp"
 
 namespace follow_path_plugins
 {
     class FollowPathTraj : public follow_path_base::FollowPathBase
     {
+        using YAW_MODE = as2_msgs::msg::TrajectoryWaypointsWithID;
+        using SyncSetSpeed = as2::SynchronousServiceClient<as2_msgs::srv::SetSpeed>;
+        using SyncSendTrajWayp = as2::SynchronousServiceClient<as2_msgs::srv::SendTrajectoryWaypoints>;
     public:
-        void ownInit(as2::Node *node_ptr) override
-        {
-            traj_waypoints_pub_ = node_ptr_->create_publisher<as2_msgs::msg::TrajectoryWaypoints>(
-                node_ptr_->generate_global_name(as2_names::topics::motion_reference::wayp), 
-                as2_names::topics::motion_reference::qos_wp);
-        }
-
-
         rclcpp_action::GoalResponse onAccepted(const std::shared_ptr<const as2_msgs::action::FollowPath::Goal> goal) override
         {
-            as2_msgs::msg::TrajectoryWaypoints trajectory_waypoints = goal->trajectory_waypoints;
-            // Populate Waypoints queue
-            for(auto it = trajectory_waypoints.poses.begin(); it != trajectory_waypoints.poses.end(); ++it ) {
-                waypoints_.push_back(Eigen::Vector3d(it->pose.position.x, it->pose.position.y, it->pose.position.z));
+            auto req_speed = as2_msgs::srv::SetSpeed::Request();
+            auto resp_speed = as2_msgs::srv::SetSpeed::Response();
+
+            req_speed.speed.speed = goal->trajectory_waypoints.max_speed;
+
+            auto set_traj_speed_cli = SyncSetSpeed(as2_names::services::motion_reference::set_traj_speed);
+            if (!set_traj_speed_cli.sendRequest(req_speed, resp_speed, 1))
+            {
+                return rclcpp_action::GoalResponse::REJECT;
             }
 
-            // Assign the goal to the Eigen Vector
-            traj_waypoints_pub_->publish(trajectory_waypoints);
+            auto req_traj = as2_msgs::srv::SendTrajectoryWaypoints::Request();
+            auto resp_traj = as2_msgs::srv::SendTrajectoryWaypoints::Response();
+            as2_msgs::msg::TrajectoryWaypoints trajectory_waypoints = goal->trajectory_waypoints;
+
+            // Populate Waypoints queue
+            for (auto &pose : trajectory_waypoints.poses)
+            {
+                waypoints_.emplace_back(Eigen::Vector3d(pose.pose.position.x, pose.pose.position.y, pose.pose.position.z));
+                as2_msgs::msg::PoseStampedWithID pose_with_id;
+                pose_with_id.pose = pose.pose;
+                req_traj.waypoints.poses.emplace_back(pose_with_id);
+            }
+            req_traj.waypoints.yaw_mode = goal->trajectory_waypoints.yaw_mode;
+
+            auto send_traj_wayp_cli = SyncSendTrajWayp(as2_names::services::motion_reference::send_traj_wayp);
+            if (!send_traj_wayp_cli.sendRequest(req_traj, resp_traj, 1))
+            {
+
+                return rclcpp_action::GoalResponse::REJECT;
+            }
+
             return rclcpp_action::GoalResponse::ACCEPT_AND_EXECUTE;
         }
 
@@ -99,9 +123,6 @@ namespace follow_path_plugins
             }
             return false;
         }
-    private:
-        rclcpp::Publisher<as2_msgs::msg::TrajectoryWaypoints>::SharedPtr traj_waypoints_pub_;  
-
     }; // FollowPathTraj class
 } // follow_path_plugins namespace
 
