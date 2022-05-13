@@ -23,7 +23,6 @@ set(PROJECT_DEPENDENCIES
   as2_core
   as2_msgs
   geometry_msgs
-  as2_motion_command_handlers
   Eigen3
 )
 
