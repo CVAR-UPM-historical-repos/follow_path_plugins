@@ -42,9 +42,9 @@
 
 #include "as2_core/synchronous_service_client.hpp"
 
-namespace follow_path_plugins
+namespace follow_path_plugin_traj
 {
-    class FollowPathTraj : public follow_path_base::FollowPathBase
+    class Plugin : public follow_path_base::FollowPathBase
     {
         using YAW_MODE = as2_msgs::msg::TrajectoryWaypointsWithID;
         using SyncSetSpeed = as2::SynchronousServiceClient<as2_msgs::srv::SetSpeed>;
@@ -160,9 +160,9 @@ namespace follow_path_plugins
             }
             return false;
         }
-    }; // FollowPathTraj class
-} // follow_path_plugins namespace
+    }; // Plugin class
+} // follow_path_plugin_traj namespace
 
 #include <pluginlib/class_list_macros.hpp>
 
-PLUGINLIB_EXPORT_CLASS(follow_path_plugins::FollowPathTraj, follow_path_base::FollowPathBase)
+PLUGINLIB_EXPORT_CLASS(follow_path_plugin_traj::Plugin, follow_path_base::FollowPathBase)
