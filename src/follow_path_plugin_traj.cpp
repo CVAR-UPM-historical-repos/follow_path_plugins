@@ -78,6 +78,8 @@ namespace follow_path_plugin_traj
             }
             req_traj.waypoints.yaw_mode = goal->trajectory_waypoints.yaw_mode;
 
+            last_waypoint_ = waypoints_.back();
+
             auto send_traj_wayp_cli = SyncSendTrajWayp(as2_names::services::motion_reference::send_traj_wayp);
             if (!send_traj_wayp_cli.sendRequest(req_traj, resp_traj, 1))
             {
@@ -110,6 +112,8 @@ namespace follow_path_plugin_traj
                                      this->current_pose_y_,
                                      this->current_pose_z_);
             float distance_to_next_waypoint = (position - next_wayp).norm();
+
+            time_ = node_ptr_->now();
 
             // Check if goal is done
             while (!checkGoalCondition())
@@ -154,12 +158,30 @@ namespace follow_path_plugin_traj
     private:
         bool checkGoalCondition()
         {
-            if (waypoints_.empty() && actual_speed_ < 0.1)
+            if (waypoints_.empty())
             {
                 return true;
             }
+
+            Eigen::Vector3d position = Eigen::Vector3d(this->current_pose_x_, this->current_pose_y_, this->current_pose_z_);
+            float distance_to_last_waypoint = (position - last_waypoint_).norm();
+            if (actual_speed_ < 0.1 && distance_to_last_waypoint < goal_threshold_ * 5.0)
+            {
+                if ((node_ptr_->now() - time_) > rclcpp::Duration(1, 0) )
+                {
+                    RCLCPP_WARN(node_ptr_->get_logger(), "Ending follow path because UAV is hovering for %f seconds over last waypoint", (node_ptr_->now() - time_).seconds());
+                    return true;
+                }
+            }
+            else
+            {
+                time_ = node_ptr_->now();
+            }
             return false;
-        }
+        };
+
+        rclcpp::Time time_;
+        Eigen::Vector3d last_waypoint_;
     }; // Plugin class
 } // follow_path_plugin_traj namespace
 
