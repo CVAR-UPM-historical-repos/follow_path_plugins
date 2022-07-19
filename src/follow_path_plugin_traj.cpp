@@ -135,7 +135,6 @@ namespace follow_path_plugin_traj
                     waypoints_.pop_front();
                 }
 
-                // RCLCPP_INFO(this->get_logger(), "Publish feedback");
                 feedback->next_waypoint.x = next_wayp[0];
                 feedback->next_waypoint.y = next_wayp[1];
                 feedback->next_waypoint.z = next_wayp[2];
