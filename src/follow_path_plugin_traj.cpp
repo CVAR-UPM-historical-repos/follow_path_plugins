@@ -135,14 +135,14 @@ namespace follow_path_plugin_traj
                     waypoints_.pop_front();
                 }
 
-                feedback->next_waypoint.x = next_wayp[0];
-                feedback->next_waypoint.y = next_wayp[1];
-                feedback->next_waypoint.z = next_wayp[2];
-                feedback->remaining_waypoints = waypoints_.size();
-                feedback->actual_distance_to_next_waypoint = distance_to_next_waypoint;
-                feedback->actual_speed = actual_speed_;
+                // feedback->next_waypoint.x = next_wayp[0];
+                // feedback->next_waypoint.y = next_wayp[1];
+                // feedback->next_waypoint.z = next_wayp[2];
+                // feedback->remaining_waypoints = waypoints_.size();
+                // feedback->actual_distance_to_next_waypoint = distance_to_next_waypoint;
+                // feedback->actual_speed = actual_speed_;
 
-                goal_handle->publish_feedback(feedback);
+                // goal_handle->publish_feedback(feedback);
 
                 loop_rate.sleep();
             }
