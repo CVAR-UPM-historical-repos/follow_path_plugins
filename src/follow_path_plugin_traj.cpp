@@ -58,7 +58,7 @@ namespace follow_path_plugin_traj
 
             req_speed.speed.speed = goal->trajectory_waypoints.max_speed;
 
-            auto set_traj_speed_cli = SyncSetSpeed(as2_names::services::motion_reference::set_traj_speed);
+            auto set_traj_speed_cli = SyncSetSpeed(as2_names::services::motion_reference::set_traj_speed, node_ptr_);
             if (!set_traj_speed_cli.sendRequest(req_speed, resp_speed, 1))
             {
                 return rclcpp_action::GoalResponse::REJECT;
@@ -80,7 +80,7 @@ namespace follow_path_plugin_traj
 
             last_waypoint_ = waypoints_.back();
 
-            auto send_traj_wayp_cli = SyncSendTrajWayp(as2_names::services::motion_reference::send_traj_wayp);
+            auto send_traj_wayp_cli = SyncSendTrajWayp(as2_names::services::motion_reference::send_traj_wayp, node_ptr_);
             if (!send_traj_wayp_cli.sendRequest(req_traj, resp_traj, 1))
             {
 
