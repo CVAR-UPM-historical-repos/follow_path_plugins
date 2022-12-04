@@ -8,7 +8,7 @@ if(NOT CMAKE_CXX_STANDARD)
 endif()
 
 # set Release as default
-if (NOT CMAKE_BUILD_TYPE)
+if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE Release)
 endif()
 
@@ -17,35 +17,53 @@ set(PROJECT_DEPENDENCIES
   ament_cmake
   ament_cmake_ros
   pluginlib
-  follow_path_plugin_base
-  rclcpp
   rclcpp_action
-  nav_msgs
   as2_core
   as2_msgs
+  as2_behavior
+  follow_path_plugin_base
+  motion_reference_handlers
   geometry_msgs
-  Eigen3
 )
 
 foreach(DEPENDENCY ${PROJECT_DEPENDENCIES})
   find_package(${DEPENDENCY} REQUIRED)
 endforeach()
 
+set(HEADER_HPP_FILES
+  include/${PROJECT_NAME}/${PROJECT_NAME}.hpp
+)
+
 include_directories(
   include
+  include/${PROJECT_NAME}
   ${EIGEN3_INCLUDE_DIRS}
 )
 
-add_library(${PROJECT_NAME} src/follow_path_plugin_traj.cpp)
+set(SOURCE_CPP_FILES
+  src/follow_path_plugin_traj.cpp
+)
+
+add_library(${PROJECT_NAME} ${SOURCE_CPP_FILES})
+
 target_include_directories(${PROJECT_NAME} PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include>)
+
 ament_target_dependencies(
   ${PROJECT_NAME}
   ${PROJECT_DEPENDENCIES}
 )
 
 pluginlib_export_plugin_description_file(follow_path_plugin_base plugins.xml)
+
+if(BUILD_TESTING)
+  find_package(ament_cmake_cppcheck REQUIRED)
+  find_package(ament_cmake_clang_format REQUIRED)
+
+  ament_cppcheck(src/ include/ tests/)
+  ament_clang_format(src/ include/ tests/ --config ${CMAKE_CURRENT_SOURCE_DIR}/.clang-format)
+endif()
 
 install(
   TARGETS ${PROJECT_NAME}
