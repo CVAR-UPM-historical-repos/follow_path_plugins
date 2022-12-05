@@ -31,8 +31,10 @@
  * EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  ********************************************************************************/
 
+#include "as2_msgs/msg/yaw_mode.hpp"
 #include "follow_path_base.hpp"
 #include "motion_reference_handlers/position_motion.hpp"
+#include "std_msgs/msg/header.hpp"
 
 namespace follow_path_plugin_position {
 class Plugin : public follow_path_base::FollowPathBase {
@@ -64,34 +66,41 @@ public:
   bool own_activate(std::shared_ptr<const as2_msgs::action::FollowPath::Goal> goal) override {
     RCLCPP_INFO(node_ptr_->get_logger(), "Follow path goal accepted");
     RCLCPP_INFO(node_ptr_->get_logger(), "Follow path with speed: %f", goal->max_speed);
-    RCLCPP_INFO(node_ptr_->get_logger(), "Follow path with yaw mode: %f", goal->yaw.mode);
+    RCLCPP_INFO(node_ptr_->get_logger(), "Follow path with yaw mode: %d", goal->yaw.mode);
 
     path_ids_.reserve(goal->path.size());
     for (auto &point : goal->path) {
-      RCLCPP_INFO(node_ptr_->get_logger(), "Follow path to point %d: %f, %f, %f", point.id,
+      RCLCPP_INFO(node_ptr_->get_logger(), "Follow path to point %s: %f, %f, %f", point.id.c_str(),
                   point.pose.position.x, point.pose.position.y, point.pose.position.z);
       path_ids_.push_back(point.id);
     }
     path_ids_remaining_ = path_ids_;
+    initial_yaw_        = as2::frame::getYawFromQuaternion(actual_pose_.pose.orientation);
+    updateDesiredPose(path_ids_remaining_[0]);
+    feedback_.next_waypoint_id = goal->path[0].id;
     return true;
   }
 
   bool own_modify(std::shared_ptr<const as2_msgs::action::FollowPath::Goal> goal) override {
     RCLCPP_INFO(node_ptr_->get_logger(), "Follow path modiy accepted");
     RCLCPP_INFO(node_ptr_->get_logger(), "Follow path with speed: %f", goal->max_speed);
-    RCLCPP_INFO(node_ptr_->get_logger(), "Follow path with yaw mode: %f", goal->yaw.mode);
+    RCLCPP_INFO(node_ptr_->get_logger(), "Follow path with yaw mode: %d", goal->yaw.mode);
 
     for (auto &point : goal->path) {
       if (std::find(path_ids_.begin(), path_ids_.end(), point.id) == path_ids_.end()) {
-        RCLCPP_INFO(node_ptr_->get_logger(), "Follow path modify point %d: %f, %f, %f", point.id,
-                    point.pose.position.x, point.pose.position.y, point.pose.position.z);
+        RCLCPP_INFO(node_ptr_->get_logger(), "Follow path modify point %s: %f, %f, %f",
+                    point.id.c_str(), point.pose.position.x, point.pose.position.y,
+                    point.pose.position.z);
       } else {
-        RCLCPP_INFO(node_ptr_->get_logger(), "Follow path add point %d: %f, %f, %f", point.id,
-                    point.pose.position.x, point.pose.position.y, point.pose.position.z);
+        RCLCPP_INFO(node_ptr_->get_logger(), "Follow path add point %s: %f, %f, %f",
+                    point.id.c_str(), point.pose.position.x, point.pose.position.y,
+                    point.pose.position.z);
         path_ids_.push_back(point.id);
         path_ids_remaining_.push_back(point.id);
       }
     }
+    initial_yaw_ = as2::frame::getYawFromQuaternion(actual_pose_.pose.orientation);
+    updateDesiredPose(path_ids_remaining_[0]);
     return true;
   }
 
@@ -102,12 +111,7 @@ public:
       return as2_behavior::ExecutionStatus::SUCCESS;
     }
 
-    if (!position_motion_handler_->sendPositionCommandWithYawAngle(
-            "earth", goal_.target_pose.point.x, goal_.target_pose.point.y,
-            goal_.target_pose.point.z, goal_.yaw.angle, "earth", goal_.max_speed, goal_.max_speed,
-            goal_.max_speed)) {
-      RCLCPP_ERROR(node_ptr_->get_logger(), "Follow path PLUGIN: Error sending position command");
-      result_.follow_path_success = false;
+    if (!position_motion_handler_->sendPositionCommandWithYawAngle(desired_pose_, desired_twist_)) {
       return as2_behavior::ExecutionStatus::FAILURE;
     }
 
@@ -118,57 +122,83 @@ public:
     RCLCPP_INFO(node_ptr_->get_logger(), "Follow path end");
     if (state == as2_behavior::ExecutionStatus::SUCCESS) {
       // Leave the drone in the last position
-
-      if (position_motion_handler_->sendPositionCommandWithYawAngle(
-              "earth", goal_.target_pose.point.x, goal_.target_pose.point.y,
-              goal_.target_pose.point.z, goal_.yaw.angle, "earth", goal_.max_speed, goal_.max_speed,
-              goal_.max_speed))
-        return;
+      position_motion_handler_->sendPositionCommandWithYawAngle(desired_pose_, desired_twist_);
+      return;
     }
     sendHover();
     return;
   }
 
   Eigen::Vector3d getTargetPosition() {
-    for (auto &waypoint : goal_.path) {
-      if (waypoint.id == path_ids_remaining_.front()) {
-        return Eigen::Vector3d(waypoint.pose.position.x, waypoint.pose.position.y,
-                               waypoint.pose.position.z);
-      }
-    }
-    return Eigen::Vector3d(0, 0, 0);
+    return Eigen::Vector3d(desired_pose_.pose.position.x, desired_pose_.pose.position.y,
+                           desired_pose_.pose.position.z);
   }
 
-  bool sendCommand(as2_msgs::msg::PoseWithID &waypoint) {
-    geometry_msgs::msg::PoseStamped pose;
-    pose.header.frame_id = "earth";
-    pose.header.stamp    = node_ptr_->now();
-    pose.pose.position.x = waypoint.pose.position.x;
-    pose.pose.position.y = waypoint.pose.position.y;
-    pose.pose.position.z = waypoint.pose.position.z;
+  geometry_msgs::msg::Quaternion processYaw(const std::string &id) {
+    geometry_msgs::msg::Quaternion orientation;
+    switch (goal_.yaw.mode) {
+      case as2_msgs::msg::YawMode::KEEP_YAW:
+        goal_.yaw.angle = initial_yaw_;
+        break;
+      case as2_msgs::msg::YawMode::PATH_FACING: {
+        Eigen::Vector2d next_pose = {desired_pose_.pose.position.x, desired_pose_.pose.position.y};
+        Eigen::Vector2d actual_pose = {actual_pose_.pose.position.x, actual_pose_.pose.position.y};
+        goal_.yaw.angle = as2::frame::getVector2DAngle((next_pose.x() - actual_pose.x()),
+                                                       (next_pose.y() - actual_pose.y()));
+        break;
+      }
+      case as2_msgs::msg::YawMode::FIXED_YAW:
+        break;
+      default:
+        RCLCPP_WARN(node_ptr_->get_logger(), "Yaw mode %d not supported, using KEEP_YAW",
+                    goal_.yaw.mode);
+        goal_.yaw.angle = initial_yaw_;
+        break;
+    }
 
-    geometry_msgs::msg::TwistStamped twist;
-    twist.header.frame_id = "earth";
-    twist.header.stamp    = node_ptr_->now();
-    twist.twist.linear.x  = goal_.max_speed;
-    twist.twist.linear.y  = goal_.max_speed;
-    twist.twist.linear.z  = goal_.max_speed;
+    as2::frame::eulerToQuaternion(0.0, 0.0, goal_.yaw.angle, orientation);
+    return orientation;
+  }
 
-    return position_motion_handler_->sendPositionCommandWithYawAngle(pose, twist);
+  void updateDesiredPose(const std::string &waypoint_id) {
+    for (auto &waypoint : goal_.path) {
+      if (waypoint.id == waypoint_id) {
+        desired_pose_.header.frame_id  = goal_.header.frame_id;
+        desired_pose_.header.stamp     = node_ptr_->now();
+        desired_pose_.pose.position.x  = waypoint.pose.position.x;
+        desired_pose_.pose.position.y  = waypoint.pose.position.y;
+        desired_pose_.pose.position.z  = waypoint.pose.position.z;
+        desired_pose_.pose.orientation = processYaw(waypoint.id);
+
+        desired_twist_.header.frame_id = goal_.header.frame_id;
+        desired_twist_.header.stamp    = node_ptr_->now();
+        desired_twist_.twist.linear.x  = goal_.max_speed;
+        desired_twist_.twist.linear.y  = goal_.max_speed;
+        desired_twist_.twist.linear.z  = goal_.max_speed;
+        return;
+      }
+    }
   }
 
 private:
   std::vector<std::string> path_ids_;
   std::vector<std::string> path_ids_remaining_;
+  double initial_yaw_;
+  geometry_msgs::msg::PoseStamped desired_pose_;
+  geometry_msgs::msg::TwistStamped desired_twist_;
 
   bool checkGoalCondition() {
-    if (distance_measured_) {
-      if (fabs(feedback_.actual_distance_to_next_waypoint) < params_.follow_path_threshold) {
-        path_ids_remaining_.erase(path_ids_remaining_.begin());
-        if (path_ids_remaining_.empty()) {
-          return true;
-        }
+    if (!distance_measured_) {
+      return false;
+    }
+
+    if (fabs(feedback_.actual_distance_to_next_waypoint) < params_.follow_path_threshold) {
+      path_ids_remaining_.erase(path_ids_remaining_.begin());
+      if (path_ids_remaining_.empty()) {
+        return true;
       }
+      feedback_.next_waypoint_id = path_ids_remaining_.front();
+      updateDesiredPose(path_ids_remaining_[0]);
     }
     return false;
   }
