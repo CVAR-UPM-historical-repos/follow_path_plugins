@@ -47,29 +47,13 @@ public:
         std::make_shared<as2::motionReferenceHandlers::PositionMotion>(node_ptr_);
   }
 
-  bool on_deactivate(const std::shared_ptr<std::string> &message) override {
-    RCLCPP_INFO(node_ptr_->get_logger(), "Goal canceled");
-    return true;
-  }
-
-  bool on_pause(const std::shared_ptr<std::string> &message) {
-    RCLCPP_INFO(node_ptr_->get_logger(), "Follow path paused");
-    sendHover();
-    return true;
-  }
-
-  bool on_resume(const std::shared_ptr<std::string> &message) {
-    RCLCPP_INFO(node_ptr_->get_logger(), "Follow path resumed");
-    return true;
-  }
-
-  bool own_activate(std::shared_ptr<const as2_msgs::action::FollowPath::Goal> goal) override {
+  bool own_activate(as2_msgs::action::FollowPath::Goal &_goal) override {
     RCLCPP_INFO(node_ptr_->get_logger(), "Follow path goal accepted");
-    RCLCPP_INFO(node_ptr_->get_logger(), "Follow path with speed: %f", goal->max_speed);
-    RCLCPP_INFO(node_ptr_->get_logger(), "Follow path with yaw mode: %d", goal->yaw.mode);
+    RCLCPP_INFO(node_ptr_->get_logger(), "Follow path with speed: %f", _goal.max_speed);
+    RCLCPP_INFO(node_ptr_->get_logger(), "Follow path with yaw mode: %d", _goal.yaw.mode);
 
-    path_ids_.reserve(goal->path.size());
-    for (auto &point : goal->path) {
+    path_ids_.reserve(_goal.path.size());
+    for (auto &point : _goal.path) {
       RCLCPP_INFO(node_ptr_->get_logger(), "Follow path to point %s: %f, %f, %f", point.id.c_str(),
                   point.pose.position.x, point.pose.position.y, point.pose.position.z);
       path_ids_.push_back(point.id);
@@ -77,16 +61,16 @@ public:
     path_ids_remaining_ = path_ids_;
     initial_yaw_        = as2::frame::getYawFromQuaternion(actual_pose_.pose.orientation);
     updateDesiredPose(path_ids_remaining_[0]);
-    feedback_.next_waypoint_id = goal->path[0].id;
+    feedback_.next_waypoint_id = _goal.path[0].id;
     return true;
   }
 
-  bool own_modify(std::shared_ptr<const as2_msgs::action::FollowPath::Goal> goal) override {
+  bool own_modify(as2_msgs::action::FollowPath::Goal &_goal) override {
     RCLCPP_INFO(node_ptr_->get_logger(), "Follow path modiy accepted");
-    RCLCPP_INFO(node_ptr_->get_logger(), "Follow path with speed: %f", goal->max_speed);
-    RCLCPP_INFO(node_ptr_->get_logger(), "Follow path with yaw mode: %d", goal->yaw.mode);
+    RCLCPP_INFO(node_ptr_->get_logger(), "Follow path with speed: %f", _goal.max_speed);
+    RCLCPP_INFO(node_ptr_->get_logger(), "Follow path with yaw mode: %d", _goal.yaw.mode);
 
-    for (auto &point : goal->path) {
+    for (auto &point : _goal.path) {
       if (std::find(path_ids_.begin(), path_ids_.end(), point.id) == path_ids_.end()) {
         RCLCPP_INFO(node_ptr_->get_logger(), "Follow path modify point %s: %f, %f, %f",
                     point.id.c_str(), point.pose.position.x, point.pose.position.y,
@@ -104,6 +88,33 @@ public:
     return true;
   }
 
+  bool own_deactivate(const std::shared_ptr<std::string> &message) override {
+    RCLCPP_INFO(node_ptr_->get_logger(), "Goal canceled");
+    return true;
+  }
+
+  bool own_pause(const std::shared_ptr<std::string> &message) override {
+    RCLCPP_INFO(node_ptr_->get_logger(), "Follow path paused");
+    sendHover();
+    return true;
+  }
+
+  bool own_resume(const std::shared_ptr<std::string> &message) override {
+    RCLCPP_INFO(node_ptr_->get_logger(), "Follow path resumed");
+    return true;
+  }
+
+  void own_execution_end(const as2_behavior::ExecutionStatus &state) override {
+    RCLCPP_INFO(node_ptr_->get_logger(), "Follow path end");
+    if (state == as2_behavior::ExecutionStatus::SUCCESS) {
+      // Leave the drone in the last position
+      position_motion_handler_->sendPositionCommandWithYawAngle(desired_pose_, desired_twist_);
+      return;
+    }
+    sendHover();
+    return;
+  }
+
   as2_behavior::ExecutionStatus own_run() override {
     if (checkGoalCondition()) {
       result_.follow_path_success = true;
@@ -118,18 +129,7 @@ public:
     return as2_behavior::ExecutionStatus::RUNNING;
   }
 
-  void own_execution_end(const as2_behavior::ExecutionStatus &state) {
-    RCLCPP_INFO(node_ptr_->get_logger(), "Follow path end");
-    if (state == as2_behavior::ExecutionStatus::SUCCESS) {
-      // Leave the drone in the last position
-      position_motion_handler_->sendPositionCommandWithYawAngle(desired_pose_, desired_twist_);
-      return;
-    }
-    sendHover();
-    return;
-  }
-
-  Eigen::Vector3d getTargetPosition() {
+  Eigen::Vector3d getTargetPosition() override {
     return Eigen::Vector3d(desired_pose_.pose.position.x, desired_pose_.pose.position.y,
                            desired_pose_.pose.position.z);
   }
@@ -188,7 +188,7 @@ private:
   geometry_msgs::msg::TwistStamped desired_twist_;
 
   bool checkGoalCondition() {
-    if (!distance_measured_) {
+    if (!localization_flag_) {
       return false;
     }
 
