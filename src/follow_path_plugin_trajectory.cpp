@@ -177,18 +177,22 @@ public:
   void feedback_callback(
       GoalHandleTrajectoryGenerator::SharedPtr,
       const std::shared_ptr<const TrajectoryGeneratorAction::Feedback> feedback) {
-    traj_gen_feedback_ = *feedback;
-    if (feedback->next_waypoint_id != next_waypoint_id_) {
-      next_waypoint_id_ = feedback->next_waypoint_id;
-      RCLCPP_INFO(node_ptr_->get_logger(), "Next waypoint id: %s", next_waypoint_id_.c_str());
+    if (feedback->next_waypoint_id != feedback_.next_waypoint_id) {
+      RCLCPP_INFO(node_ptr_->get_logger(), "Next waypoint id: %s",
+                  feedback->next_waypoint_id.c_str());
+      RCLCPP_INFO(node_ptr_->get_logger(), "Remaining waypoints: %d",
+                  feedback->remaining_waypoints);
       // Update target position
       for (auto waypoint : goal_.path) {
-        if (waypoint.id == next_waypoint_id_) {
+        if (waypoint.id == feedback->next_waypoint_id) {
           desired_pose_ = waypoint.pose;
           break;
         }
       }
     }
+
+    feedback_.remaining_waypoints = feedback->remaining_waypoints;
+    feedback_.next_waypoint_id    = feedback->next_waypoint_id;
     return;
   }
 
@@ -202,13 +206,11 @@ private:
   std::shared_ptr<rclcpp_action::Client<TrajectoryGeneratorAction>> traj_gen_client_ = nullptr;
   rclcpp_action::Client<TrajectoryGeneratorAction>::SendGoalOptions traj_gen_goal_options_;
   std::shared_future<GoalHandleTrajectoryGenerator::SharedPtr> traj_gen_goal_handle_future_;
-  TrajectoryGeneratorAction::Feedback traj_gen_feedback_;
 
   bool traj_gen_goal_accepted_   = false;
   bool traj_gen_result_received_ = false;
   bool traj_gen_result_          = false;
 
-  std::string next_waypoint_id_ = "";
   geometry_msgs::msg::Pose desired_pose_;
 
 private:

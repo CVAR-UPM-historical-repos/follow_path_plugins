@@ -60,8 +60,9 @@ public:
     }
     path_ids_remaining_ = path_ids_;
     initial_yaw_        = as2::frame::getYawFromQuaternion(actual_pose_.pose.orientation);
-    updateDesiredPose(path_ids_remaining_[0]);
-    feedback_.next_waypoint_id = _goal.path[0].id;
+    updateDesiredPose(_goal, path_ids_remaining_[0]);
+    feedback_.next_waypoint_id    = path_ids_remaining_.front();
+    feedback_.remaining_waypoints = path_ids_remaining_.size();
     return true;
   }
 
@@ -84,7 +85,9 @@ public:
       }
     }
     initial_yaw_ = as2::frame::getYawFromQuaternion(actual_pose_.pose.orientation);
-    updateDesiredPose(path_ids_remaining_[0]);
+    updateDesiredPose(_goal, path_ids_remaining_[0]);
+    feedback_.next_waypoint_id    = path_ids_remaining_.front();
+    feedback_.remaining_waypoints = path_ids_remaining_.size();
     return true;
   }
 
@@ -134,16 +137,17 @@ public:
                            desired_pose_.pose.position.z);
   }
 
-  geometry_msgs::msg::Quaternion processYaw(const std::string &id) {
+  geometry_msgs::msg::Quaternion processYaw(as2_msgs::action::FollowPath::Goal &_goal,
+                                            const std::string &id) {
     geometry_msgs::msg::Quaternion orientation;
-    switch (goal_.yaw.mode) {
+    switch (_goal.yaw.mode) {
       case as2_msgs::msg::YawMode::KEEP_YAW:
-        goal_.yaw.angle = initial_yaw_;
+        _goal.yaw.angle = initial_yaw_;
         break;
       case as2_msgs::msg::YawMode::PATH_FACING: {
         Eigen::Vector2d next_pose = {desired_pose_.pose.position.x, desired_pose_.pose.position.y};
         Eigen::Vector2d actual_pose = {actual_pose_.pose.position.x, actual_pose_.pose.position.y};
-        goal_.yaw.angle = as2::frame::getVector2DAngle((next_pose.x() - actual_pose.x()),
+        _goal.yaw.angle = as2::frame::getVector2DAngle((next_pose.x() - actual_pose.x()),
                                                        (next_pose.y() - actual_pose.y()));
         break;
       }
@@ -151,33 +155,35 @@ public:
         break;
       default:
         RCLCPP_WARN(node_ptr_->get_logger(), "Yaw mode %d not supported, using KEEP_YAW",
-                    goal_.yaw.mode);
-        goal_.yaw.angle = initial_yaw_;
+                    _goal.yaw.mode);
+        _goal.yaw.angle = initial_yaw_;
         break;
     }
 
-    as2::frame::eulerToQuaternion(0.0, 0.0, goal_.yaw.angle, orientation);
+    as2::frame::eulerToQuaternion(0.0, 0.0, _goal.yaw.angle, orientation);
     return orientation;
   }
 
-  void updateDesiredPose(const std::string &waypoint_id) {
-    for (auto &waypoint : goal_.path) {
+  void updateDesiredPose(as2_msgs::action::FollowPath::Goal &_goal,
+                         const std::string &waypoint_id) {
+    for (auto &waypoint : _goal.path) {
       if (waypoint.id == waypoint_id) {
-        desired_pose_.header.frame_id  = goal_.header.frame_id;
+        desired_pose_.header.frame_id  = _goal.header.frame_id;
         desired_pose_.header.stamp     = node_ptr_->now();
         desired_pose_.pose.position.x  = waypoint.pose.position.x;
         desired_pose_.pose.position.y  = waypoint.pose.position.y;
         desired_pose_.pose.position.z  = waypoint.pose.position.z;
-        desired_pose_.pose.orientation = processYaw(waypoint.id);
+        desired_pose_.pose.orientation = processYaw(_goal, waypoint.id);
 
-        desired_twist_.header.frame_id = goal_.header.frame_id;
+        desired_twist_.header.frame_id = _goal.header.frame_id;
         desired_twist_.header.stamp    = node_ptr_->now();
-        desired_twist_.twist.linear.x  = goal_.max_speed;
-        desired_twist_.twist.linear.y  = goal_.max_speed;
-        desired_twist_.twist.linear.z  = goal_.max_speed;
+        desired_twist_.twist.linear.x  = _goal.max_speed;
+        desired_twist_.twist.linear.y  = _goal.max_speed;
+        desired_twist_.twist.linear.z  = _goal.max_speed;
         return;
       }
     }
+    return;
   }
 
 private:
@@ -197,8 +203,9 @@ private:
       if (path_ids_remaining_.empty()) {
         return true;
       }
-      feedback_.next_waypoint_id = path_ids_remaining_.front();
-      updateDesiredPose(path_ids_remaining_[0]);
+      feedback_.next_waypoint_id    = path_ids_remaining_.front();
+      feedback_.remaining_waypoints = path_ids_remaining_.size();
+      updateDesiredPose(goal_, path_ids_remaining_[0]);
     }
     return false;
   }
